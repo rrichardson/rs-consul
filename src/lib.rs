@@ -37,7 +37,6 @@ use hyper_rustls::HttpsConnector;
 #[cfg(feature = "default-tls")]
 use hyper_tls::HttpsConnector;
 
-#[cfg(feature = "metrics")]
 use lazy_static::lazy_static;
 use opentelemetry::global;
 use opentelemetry::global::BoxedTracer;
@@ -47,7 +46,6 @@ use quick_error::quick_error;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use slog_scope::{error, info};
 use tokio::time::timeout;
-
 pub use types::*;
 
 mod hyper_wrapper;
@@ -68,6 +66,8 @@ quick_error! {
         InvalidResponse(err: hyper::Error) {}
         /// The consul server response could not be deserialized from json.
         ResponseDeserializationFailed(err: serde_json::error::Error) {}
+        /// The consul server response could not be deserialized from bytes.
+        RequestSerializationFailed(err: serde_json::error::Error) {}
         /// The consul server response could not be deserialized from bytes.
         ResponseStringDeserializationFailed(err: std::str::Utf8Error) {}
         /// The consul server response was something other than 200. The status code and the body of the response are included.
@@ -131,15 +131,21 @@ lazy_static! {
         .unwrap();
 }
 
+lazy_static! {
+    static ref DEFAULT_QUERY_OPTS: QueryOptions = Default::default();
+}
+
 const READ_KEY_METHOD_NAME: &str = "read_key";
 const CREATE_OR_UPDATE_KEY_METHOD_NAME: &str = "create_or_update_key";
+const CREATE_OR_UPDATE_ALL_METHOD_NAME: &str = "create_or_update_all";
 const CREATE_OR_UPDATE_KEY_SYNC_METHOD_NAME: &str = "create_or_update_key_sync";
 const DELETE_KEY_METHOD_NAME: &str = "delete_key";
 const GET_LOCK_METHOD_NAME: &str = "get_lock";
 const REGISTER_ENTITY_METHOD_NAME: &str = "register_entity";
 const GET_ALL_REGISTERED_SERVICE_NAMES_METHOD_NAME: &str = "get_all_registered_service_names";
 const GET_SERVICE_NODES_METHOD_NAME: &str = "get_service_nodes";
-const GET_SESSION_METHOD_NAME: &str = "get_session";
+const CREATE_SESSION_METHOD_NAME: &str = "create_session";
+const GET_DATACENTERS: &str = "get_datacenters";
 
 pub(crate) type Result<T> = std::result::Result<T, ConsulError>;
 
@@ -173,7 +179,7 @@ impl Config {
 /// The lifetime of this object defines the validity of the lock against consul.
 /// When the object is dropped, the lock is attempted to be released for the next consumer.
 #[derive(Clone, Debug)]
-pub struct Lock<'a> {
+pub struct LockGuard<'a> {
     /// The session ID of the lock.
     pub session_id: String,
     /// The key for the lock.
@@ -190,7 +196,7 @@ pub struct Lock<'a> {
     pub consul: &'a Consul,
 }
 
-impl Drop for Lock<'_> {
+impl Drop for LockGuard<'_> {
     fn drop(&mut self) {
         let req = CreateOrUpdateKeyRequest {
             key: &self.key,
@@ -226,6 +232,16 @@ fn https_client() -> HttpsConnector<HttpConnector> {
     return HttpsConnector::new();
 }
 
+impl Clone for Consul {
+    fn clone(&self) -> Self {
+        Consul {
+            https_client: self.https_client.clone(),
+            config: self.config.clone(),
+            tracer: global::tracer("consul"),
+        }
+    }
+}
+
 impl Consul {
     /// Creates a new instance of [`Consul`](consul::Consul).
     /// This is the entry point for this crate.
@@ -241,35 +257,6 @@ impl Consul {
         }
     }
 
-    /// Reads keys from Consul's KV store and returns them as `String`s
-    /// See the [consul docs](https://www.consul.io/api-docs/kv#read-key) for more information.
-    /// # Arguments:
-    /// - request - the [ReadKeyRequest](consul::types::ReadKeyRequest)
-    /// # Errors:
-    /// [ConsulError](consul::ConsulError) describes all possible errors returned by this api.
-    pub async fn read_string(
-        &self,
-        request: ReadKeyRequest<'_>,
-    ) -> Result<Vec<ReadKeyResponse<String>>> {
-        let req = self.build_read_key_req(request);
-        let (mut response_body, _index) = self
-            .execute_request(req, hyper::Body::empty(), None, READ_KEY_METHOD_NAME)
-            .await?;
-        let bytes = response_body.copy_to_bytes(response_body.remaining());
-        serde_json::from_slice::<Vec<ReadKeyResponse<String>>>(&bytes)
-            .map_err(ConsulError::ResponseDeserializationFailed)?
-            .into_iter()
-            .map(|mut r| {
-                r.value = match r.value {
-                    Some(val) => Some(std::str::from_utf8(&base64::decode(val)?)?.to_string()),
-                    None => None,
-                };
-
-                Ok(r)
-            })
-            .collect()
-    }
-
     /// Reads keys from Consul's KV store and returns them as `Vec<u8>`s
     /// See the [consul docs](https://www.consul.io/api-docs/kv#read-key) for more information.
     /// # Arguments:
@@ -283,17 +270,7 @@ impl Consul {
             .await?;
         let bytes = response_body.copy_to_bytes(response_body.remaining());
         serde_json::from_slice::<Vec<ReadKeyResponse>>(&bytes)
-            .map_err(ConsulError::ResponseDeserializationFailed)?
-            .into_iter()
-            .map(|mut r| {
-                let v = match r.value {
-                    Some(ref val) => Some(base64::decode(val)?),
-                    None => None,
-                };
-                r.value = v;
-                Ok(r)
-            })
-            .collect::<Result<Vec<ReadKeyResponse>>>()
+            .map_err(ConsulError::ResponseDeserializationFailed)
     }
 
     /// Reads keys from Consul's KV store and attempts to deserialize them into
@@ -318,7 +295,7 @@ impl Consul {
             .map(|r| {
                 let v = match r.value {
                     Some(ref val) => Some(
-                        serde_json::from_slice(&base64::decode(val)?)
+                        serde_json::from_slice(&val.0)
                             .map_err(ConsulError::ResponseDeserializationFailed)?,
                     ),
                     None => None,
@@ -364,6 +341,36 @@ impl Consul {
             serde_json::from_slice(&bytes).map_err(ConsulError::ResponseDeserializationFailed)?,
             index,
         ))
+    }
+
+    /// Executes a transaction in Consul's KV store.
+    /// This takes a vector of operations, and only succeeds if all operations within the Vec of operations
+    /// See https://developer.hashicorp.com/consul/api-docs/txn for more information
+    pub async fn create_or_update_all(
+        &self,
+        request: Vec<TransactionOp<'_>>,
+        datacenter: Option<&str>,
+    ) -> Result<Vec<TransactionResponse>> {
+        let url = self.build_create_txn_url(datacenter);
+        let req = hyper::Request::builder().method(Method::PUT).uri(url);
+        let txn_request: Vec<HashMap<&'static str, TransactionOp>> = request
+            .into_iter()
+            .map(|r| HashMap::from([("KV", r)]))
+            .collect();
+        let data =
+            serde_json::to_vec(&txn_request).map_err(ConsulError::RequestSerializationFailed)?;
+        let (mut response_body, _index) = self
+            .execute_request(
+                req,
+                Body::from(data),
+                None,
+                CREATE_OR_UPDATE_ALL_METHOD_NAME,
+            )
+            .await?;
+        let bytes = response_body.copy_to_bytes(response_body.remaining());
+        let resp = serde_json::from_slice::<Vec<TransactionResponse>>(&bytes)
+            .map_err(ConsulError::ResponseDeserializationFailed)?;
+        Ok(resp)
     }
 
     /// Creates or updates a key in Consul's KV store. See the [consul docs](https://www.consul.io/api-docs/kv#create-update-key) for more information.
@@ -436,33 +443,55 @@ impl Consul {
         serde_json::from_slice(&bytes).map_err(ConsulError::ResponseDeserializationFailed)
     }
 
-    /// Obtains a lock against a specific key in consul. See the [consul docs](https://learn.hashicorp.com/tutorials/consul/application-leader-elections?in=consul/developer-configuration) for more information.
+    /// Attempts to acquire a lock for a given key.
+    /// This creates a new session that will own the lock,
+    /// if successful acquiring the lock, it will then return a `LockGuard` which will attempt to
+    /// release the lock when it goes out of scope.
+    /// If it fails to acquire the lock, it will return a `ConsulError::LockAcquisitionError`
+    /// See the [consul docs](https://learn.hashicorp.com/tutorials/consul/application-leader-elections?in=consul/developer-configuration) for more information.
     /// # Arguments:
     /// - request - the [LockRequest](consul::types::LockRequest)
     /// # Errors:
     /// [ConsulError](consul::ConsulError) describes all possible errors returned by this api.
-    pub async fn get_lock(&self, request: LockRequest<'_>, value: &[u8]) -> Result<Lock<'_>> {
-        let session = self.get_session(request).await?;
+    pub async fn get_lock(
+        &self,
+        mut request: LockRequest<'_>,
+        value: &[u8],
+    ) -> Result<LockGuard<'_>> {
+        let session = self.create_session(&request).await?;
+        request.session_id = session.id.as_str();
+        let _lock_res = self.get_lock_inner(&request, value).await?;
+        // No need to check lock_res, if it didn't return Err, then the lock was successful
+        Ok(LockGuard {
+            timeout: request.timeout,
+            key: request.key.to_string(),
+            session_id: request.session_id.to_owned(),
+            consul: self,
+            datacenter: request.datacenter.to_string(),
+            namespace: request.namespace.to_string(),
+            value: Some(value.to_owned()),
+        })
+    }
+
+    /// Lower-level lock function wich acquires the lock in consul and returns true if the lock
+    /// succeeded, otherwise it returns a LockAcquisitionFailure error
+    /// See the [consul docs](https://learn.hashicorp.com/tutorials/consul/application-leader-elections?in=consul/developer-configuration) for more information.
+    /// # Arguments:
+    /// - request - the [LockRequest](consul::types::LockRequest)
+    /// # Errors:
+    /// [ConsulError](consul::ConsulError) describes all possible errors returned by this api.
+    pub async fn get_lock_inner(&self, request: &LockRequest<'_>, value: &[u8]) -> Result<bool> {
         let req = CreateOrUpdateKeyRequest {
             key: request.key,
             namespace: request.namespace,
             datacenter: request.datacenter,
-            acquire: &session.id,
+            acquire: request.session_id,
             ..Default::default()
         };
         let value_copy = value.to_vec();
         let (lock_acquisition_result, _index) = self.create_or_update_key(req, value_copy).await?;
         if lock_acquisition_result {
-            let value_copy = value.to_vec();
-            Ok(Lock {
-                timeout: request.timeout,
-                key: request.key.to_string(),
-                session_id: session.id,
-                consul: self,
-                datacenter: request.datacenter.to_string(),
-                namespace: request.namespace.to_string(),
-                value: Some(value_copy),
-            })
+            Ok(lock_acquisition_result)
         } else {
             let watch_req = ReadKeyRequest {
                 key: request.key,
@@ -534,20 +563,15 @@ impl Consul {
     /// [ConsulError](consul::ConsulError) describes all possible errors returned by this api.
     pub async fn get_all_registered_service_names(
         &self,
-        query_opts: Option<QueryOptions>,
+        query_opts: Option<&QueryOptions>,
     ) -> Result<ResponseMeta<Vec<String>>> {
-        let mut uri = format!("{}/v1/catalog/services", self.config.address);
-        let query_opts = query_opts.unwrap_or_default();
-        add_query_option_params(&mut uri, &query_opts, '?');
-
-        let request = hyper::Request::builder()
-            .method(Method::GET)
-            .uri(uri.clone());
+        let opts = query_opts.unwrap_or(&(*DEFAULT_QUERY_OPTS));
+        let request = self.create_get_catalog_request("services", opts);
         let (mut response_body, index) = self
             .execute_request(
                 request,
                 hyper::Body::empty(),
-                query_opts.timeout,
+                opts.timeout,
                 GET_ALL_REGISTERED_SERVICE_NAMES_METHOD_NAME,
             )
             .await?;
@@ -559,6 +583,43 @@ impl Consul {
             response: service_tags_by_name.keys().cloned().collect(),
             index,
         })
+    }
+
+    /// Returns all datacenters currently registered in consul
+    /// See https://developer.hashicorp.com/consul/api-docs/catalog#list-datacenters
+    /// # Arguments:
+    /// - query_opts: The [`QueryOptions`](QueryOptions) to apply for this endpoint.
+    /// # Errors:
+    /// [ConsulError](consul::ConsulError) describes all possible errors returned by this api.
+    pub async fn get_datacenters(
+        &self,
+        query_opts: Option<&QueryOptions>,
+    ) -> Result<ResponseMeta<Vec<String>>> {
+        let opts = query_opts.unwrap_or(&(*DEFAULT_QUERY_OPTS));
+        let request = self.create_get_catalog_request("datacenters", opts);
+        let (mut response_body, index) = self
+            .execute_request(request, hyper::Body::empty(), opts.timeout, GET_DATACENTERS)
+            .await?;
+        let bytes = response_body.copy_to_bytes(response_body.remaining());
+        let service_tags_by_name = serde_json::from_slice::<HashMap<String, Vec<String>>>(&bytes)
+            .map_err(ConsulError::ResponseDeserializationFailed)?;
+
+        Ok(ResponseMeta {
+            response: service_tags_by_name.keys().cloned().collect(),
+            index,
+        })
+    }
+
+    fn create_get_catalog_request(
+        &self,
+        name: &str,
+        query_opts: &QueryOptions,
+    ) -> http::request::Builder {
+        let mut uri = format!("{}/v1/catalog/{}", self.config.address, name);
+        add_query_option_params(&mut uri, query_opts, '?');
+        hyper::Request::builder()
+            .method(Method::GET)
+            .uri(uri.clone())
     }
 
     /// returns the nodes providing the service indicated on the path.
@@ -678,10 +739,11 @@ impl Consul {
         req.uri(url)
     }
 
-    async fn get_session(&self, request: LockRequest<'_>) -> Result<SessionResponse> {
+    /// Create a new session
+    pub async fn create_session(&self, request: &LockRequest<'_>) -> Result<SessionResponse> {
         let session_req = CreateSessionRequest {
             lock_delay: request.lock_delay,
-            behavior: request.behavior,
+            behavior: request.behavior.clone(),
             ttl: request.timeout,
             ..Default::default()
         };
@@ -698,7 +760,7 @@ impl Consul {
                 req,
                 hyper::Body::from(create_session_json),
                 None,
-                GET_SESSION_METHOD_NAME,
+                CREATE_SESSION_METHOD_NAME,
             )
             .await?;
         let bytes = response_body.copy_to_bytes(response_body.remaining());
@@ -716,7 +778,9 @@ impl Consul {
             "{}/v1/health/service/{}",
             self.config.address, request.service
         ));
-        url.push_str(&format!("?passing={}", request.passing));
+        if request.passing {
+            url.push_str(&format!("?passing={}", request.passing));
+        }
         if let Some(near) = request.near {
             url.push_str(&format!("&near={}", near));
         }
@@ -801,9 +865,16 @@ impl Consul {
         }
     }
 
+    fn build_create_txn_url(&self, datacenter: Option<&str>) -> String {
+        let mut url = format!("{}/v1/txn", self.config.address);
+        if let Some(dc) = datacenter {
+            url.push_str(&format!("?datacenter={}", dc));
+        }
+        url
+    }
+
     fn build_create_or_update_url(&self, request: CreateOrUpdateKeyRequest<'_>) -> String {
-        let mut url = String::new();
-        url.push_str(&format!("{}/v1/kv/{}", self.config.address, request.key,));
+        let mut url = format!("{}/v1/kv/{}", self.config.address, request.key);
         let mut added_query_param = false;
         if request.flags != 0 {
             url = add_query_param_separator(url, added_query_param);
@@ -1150,6 +1221,8 @@ mod tests {
             node: "node".to_string(),
             address: "1.1.1.1".to_string(),
             datacenter: "datacenter".to_string(),
+            tagged_addresses: HashMap::new(),
+            meta: HashMap::new(),
         };
 
         let service = Service {
@@ -1209,7 +1282,7 @@ mod tests {
             key,
             ..Default::default()
         };
-        consul.read_string(req).await
+        consul.read_obj::<String>(req).await
     }
 
     async fn delete_key(consul: &Consul, key: &str) -> Result<bool> {
