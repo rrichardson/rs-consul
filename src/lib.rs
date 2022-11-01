@@ -136,6 +136,7 @@ lazy_static! {
 }
 
 const READ_KEY_METHOD_NAME: &str = "read_key";
+const READ_OBJ_METHOD_NAME: &str = "read_obj";
 const CREATE_OR_UPDATE_KEY_METHOD_NAME: &str = "create_or_update_key";
 const CREATE_OR_UPDATE_ALL_METHOD_NAME: &str = "create_or_update_all";
 const CREATE_OR_UPDATE_KEY_SYNC_METHOD_NAME: &str = "create_or_update_key_sync";
@@ -270,7 +271,7 @@ impl Consul {
     /// - request - the [ReadKeyRequest](consul::types::ReadKeyRequest)
     /// # Errors:
     /// [ConsulError](consul::ConsulError) describes all possible errors returned by this api.
-    pub async fn read_key(&self, request: ReadKeyRequest<'_>) -> Result<Vec<ReadKeyResponse>> {
+    pub async fn read_vec(&self, request: ReadKeyRequest<'_>) -> Result<Vec<ReadKeyResponse>> {
         let req = self.build_read_key_req(request);
         let (mut response_body, _index) = self
             .execute_request(req, hyper::Body::empty(), None, READ_KEY_METHOD_NAME)
@@ -287,13 +288,13 @@ impl Consul {
     /// - request - the [ReadKeyRequest](consul::types::ReadKeyRequest)
     /// # Errors:
     /// [ConsulError](consul::ConsulError) describes all possible errors returned by this api.
-    pub async fn read_obj<T>(&self, request: ReadKeyRequest<'_>) -> Result<Vec<ReadKeyResponse<T>>>
+    pub async fn read_key<T>(&self, request: ReadKeyRequest<'_>) -> Result<Vec<ReadKeyResponse<T>>>
     where
         T: DeserializeOwned + Default + std::fmt::Debug,
     {
         let req = self.build_read_key_req(request);
         let (mut response_body, _index) = self
-            .execute_request(req, hyper::Body::empty(), None, READ_KEY_METHOD_NAME)
+            .execute_request(req, hyper::Body::empty(), None, READ_OBJ_METHOD_NAME)
             .await?;
         let bytes = response_body.copy_to_bytes(response_body.remaining());
         serde_json::from_slice::<Vec<ReadKeyResponse<Base64Vec>>>(&bytes)
@@ -1076,7 +1077,7 @@ mod tests {
             .unwrap();
         assert!(res.0);
         let req = ReadKeyRequest::new().set_key(key);
-        let res = consul.read_obj::<ComplexStruct>(req).await.unwrap();
+        let res = consul.read_key::<ComplexStruct>(req).await.unwrap();
         assert_eq!(value, res.into_iter().next().unwrap().value.unwrap());
     }
 
@@ -1364,7 +1365,7 @@ mod tests {
 
     async fn read_string(consul: &Consul, key: &str) -> Result<Vec<ReadKeyResponse<String>>> {
         let req = ReadKeyRequest::new().set_key(key);
-        consul.read_obj::<String>(req).await
+        consul.read_key::<String>(req).await
     }
 
     async fn delete_key(consul: &Consul, key: &str) -> Result<bool> {
