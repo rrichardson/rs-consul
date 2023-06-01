@@ -46,6 +46,7 @@ use quick_error::quick_error;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use slog_scope::{error, info};
 use tokio::time::timeout;
+use tracing::trace;
 pub use types::*;
 
 mod hyper_wrapper;
@@ -762,6 +763,7 @@ impl Consul {
             )
             .await?;
         let bytes = response_body.copy_to_bytes(response_body.remaining());
+        trace!(?bytes, "response from consul");
         let response = serde_json::from_slice::<GetServiceNodesResponse>(&bytes)
             .map_err(ConsulError::ResponseDeserializationFailed)?;
         Ok(ResponseMeta { response, index })
