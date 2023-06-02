@@ -1132,6 +1132,7 @@ fn record_duration_metric_if_enabled(_method: &Method, _function: &str, _duratio
 mod tests {
     use std::time::Duration;
 
+    use test_log::test;
     use tokio::time::sleep;
 
     use super::*;
@@ -1254,7 +1255,7 @@ mod tests {
         assert!(service_names_after_register.contains(&new_service_name.to_owned()));
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[test(tokio::test(flavor = "multi_thread", worker_threads = 4))]
     async fn get_services_nodes() {
         let consul = get_client();
         let req = GetServiceNodesRequest {
@@ -1279,6 +1280,7 @@ mod tests {
             "2.2.2.2".to_string(),
             "3.3.3.3".to_string(),
         ];
+        println!("addresses: {:?}", addresses);
         assert!(expected_addresses
             .iter()
             .all(|item| addresses.contains(item)));

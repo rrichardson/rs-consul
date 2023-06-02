@@ -531,6 +531,7 @@ pub struct Node {
 /// The node information as returned by the Consul Catalog API
 pub struct NodeFull {
     /// The ID of the service node.
+    #[serde(rename = "ID")]
     pub id: String,
     /// The name of the Consul node on which the service is registered
     pub node: String,
@@ -561,11 +562,22 @@ pub struct NodeFull {
     /// user defined metadata for the service
     pub service_meta: HashMap<String, String>,
     /// Map of explicit LAN and WAN addresses for the service instance
-    pub service_tagged_addresses: HashMap<String, String>,
+    /// Note that the values could be either a string address or a port number
+    pub service_tagged_addresses: HashMap<String, TaggedAddress>,
     /// List of tags for the service
     pub service_tags: Vec<String>,
     /// Consul enterprise namespace of the service
     pub namespace: Option<String>,
+}
+
+/// A service address with an optional port.
+#[derive(Clone, Debug, SmartDefault, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "PascalCase")]
+pub struct TaggedAddress {
+    /// The address of the instance.
+    pub address: String,
+    /// The port of the instance.
+    pub port: Option<u16>,
 }
 
 #[derive(Clone, Debug, SmartDefault, Serialize, Deserialize, PartialEq, Eq)]
