@@ -580,7 +580,7 @@ pub struct Service {
     /// The address of the instance.
     pub address: String,
     /// The port of the instance.
-    pub port: u16,
+    pub port: Option<u16>,
 }
 
 pub(crate) fn serialize_duration_as_string<S>(

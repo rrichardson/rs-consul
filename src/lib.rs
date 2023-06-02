@@ -774,7 +774,7 @@ impl Consul {
         &self,
         service_name: &str,
         query_opts: Option<QueryOptions>,
-    ) -> Result<Vec<(String, u16)>> {
+    ) -> Result<Vec<(String, Option<u16>)>> {
         let request = GetServiceNodesRequest {
             service: service_name,
             passing: true,
@@ -812,11 +812,11 @@ impl Consul {
     /// in the health endpoint. These requests models are primarily for the
     /// health endpoints
     /// https://www.consul.io/api-docs/health#list-nodes-for-service
-    fn parse_host_port_from_service_node_response(sn: ServiceNode) -> (String, u16) {
+    fn parse_host_port_from_service_node_response(sn: ServiceNode) -> (String, Option<u16>) {
         (
             if sn.service.address.is_empty() {
                 info!(
-                    "Consul service {service_name} instance had an empty Service address, with port:{port}",
+                    "Consul service {service_name} instance had an empty Service address, with port:{port:?}",
                     service_name = &sn.service.service, port = sn.service.port
                 );
                 sn.node.address
@@ -1191,7 +1191,7 @@ mod tests {
         for sn in list_response.response.iter() {
             let dereg_request = DeregisterEntityRequest {
                 node: "local",
-                service_id: Some(sn.service.id.as_str()),
+                service_id: Some(sn.id.as_str()),
                 ..Default::default()
             };
             consul.deregister_entity(&dereg_request).await.unwrap();
@@ -1262,10 +1262,7 @@ mod tests {
         let ResponseMeta { response, .. } = consul.get_service_nodes(req, None).await.unwrap();
         assert_eq!(response.len(), 3);
 
-        let addresses: Vec<String> = response
-            .iter()
-            .map(|sn| sn.service.address.clone())
-            .collect();
+        let addresses: Vec<String> = response.iter().map(|sn| sn.address.clone()).collect();
         let expected_addresses = vec![
             "1.1.1.1".to_string(),
             "2.2.2.2".to_string(),
@@ -1277,7 +1274,7 @@ mod tests {
 
         let _: Vec<_> = response
             .iter()
-            .map(|sn| assert_eq!("dc1", sn.node.datacenter))
+            .map(|sn| assert_eq!("dc1", sn.datacenter))
             .collect();
     }
 
@@ -1417,14 +1414,14 @@ mod tests {
             id: "node".to_string(),
             service: "node".to_string(),
             address: "2.2.2.2".to_string(),
-            port: 32,
+            port: Some(32),
         };
 
         let empty_service = Service {
             id: "".to_string(),
             service: "".to_string(),
             address: "".to_string(),
-            port: 32,
+            port: Some(32),
         };
 
         let sn = ServiceNode {
