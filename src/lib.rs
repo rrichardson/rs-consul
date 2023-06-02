@@ -1274,13 +1274,15 @@ mod tests {
         let ResponseMeta { response, .. } = consul.get_service_nodes(req, None).await.unwrap();
         assert_eq!(response.len(), 3);
 
-        let addresses: Vec<String> = response.iter().map(|sn| sn.address.clone()).collect();
+        let addresses: Vec<String> = response
+            .iter()
+            .map(|sn| sn.service_address.clone().unwrap())
+            .collect();
         let expected_addresses = vec![
             "1.1.1.1".to_string(),
             "2.2.2.2".to_string(),
             "3.3.3.3".to_string(),
         ];
-        println!("addresses: {:?}", addresses);
         assert!(expected_addresses
             .iter()
             .all(|item| addresses.contains(item)));
