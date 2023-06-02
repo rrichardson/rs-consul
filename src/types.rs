@@ -530,24 +530,42 @@ pub struct Node {
 #[serde(rename_all = "PascalCase")]
 /// The node information as returned by the Consul Catalog API
 pub struct NodeFull {
-    id: String,
-    node: String,
-    address: String,
-    datacenter: String,
-    tagged_addresses: HashMap<String, String>,
-    node_meta: HashMap<String, String>,
-    create_index: u64,
-    modify_index: u64,
-    service_address: Option<String>,
-    service_enable_tag_override: Option<bool>,
+    /// The ID of the service node.
+    pub id: String,
+    /// The name of the Consul node on which the service is registered
+    pub node: String,
+    /// The IP address of the Consul node on which the service is registered.
+    pub address: String,
+    /// The datacenter where this node is running on.
+    pub datacenter: String,
+    /// List of explicit WAN and LAN addresses for the node
+    pub tagged_addresses: HashMap<String, String>,
+    /// Map of metadata options
+    pub node_meta: HashMap<String, String>,
+    /// The node's creation index, a unique identifier used for optimistic locking of the node
+    pub create_index: u64,
+    /// The node's last modified index, a unique identifier used for optimistic locking of the node
+    pub modify_index: u64,
+    /// IP address of the service host
+    pub service_address: Option<String>,
+    /// Indicates whether service tags can be overridden on this service
+    pub service_enable_tag_override: Option<bool>,
+
+    /// Unique service instance ID
     #[serde(rename = "Service_ID")]
-    service_id: Option<String>,
-    service_name: Option<String>,
-    service_port: Option<u16>,
-    service_meta: HashMap<String, String>,
-    service_tagged_addresses: HashMap<String, String>,
-    service_tags: Vec<String>,
-    namespace: Option<String>,
+    pub service_id: Option<String>,
+    /// The name of the service, i.e. redis.
+    pub service_name: Option<String>,
+    /// The port of the service
+    pub service_port: Option<u16>,
+    /// user defined metadata for the service
+    pub service_meta: HashMap<String, String>,
+    /// Map of explicit LAN and WAN addresses for the service instance
+    pub service_tagged_addresses: HashMap<String, String>,
+    /// List of tags for the service
+    pub service_tags: Vec<String>,
+    /// Consul enterprise namespace of the service
+    pub namespace: Option<String>,
 }
 
 #[derive(Clone, Debug, SmartDefault, Serialize, Deserialize, PartialEq, Eq)]
