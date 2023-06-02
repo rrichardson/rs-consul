@@ -46,6 +46,7 @@ use quick_error::quick_error;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use slog_scope::{error, info};
 use tokio::time::timeout;
+use tracing::trace;
 pub use types::*;
 
 mod hyper_wrapper;
@@ -278,6 +279,7 @@ impl Consul {
             .execute_request(req, hyper::Body::empty(), None, READ_KEY_METHOD_NAME)
             .await?;
         let bytes = response_body.copy_to_bytes(response_body.remaining());
+        trace!(?bytes, "response from consul");
         serde_json::from_slice::<Vec<ReadKeyResponse>>(&bytes)
             .map_err(ConsulError::ResponseDeserializationFailed)
     }
@@ -298,6 +300,7 @@ impl Consul {
             .execute_request(req, hyper::Body::empty(), None, READ_OBJ_METHOD_NAME)
             .await?;
         let bytes = response_body.copy_to_bytes(response_body.remaining());
+        trace!(?bytes, "response from consul");
         serde_json::from_slice::<Vec<ReadKeyResponse<Base64Vec>>>(&bytes)
             .map_err(ConsulError::ResponseDeserializationFailed)?
             .into_iter()
@@ -351,6 +354,7 @@ impl Consul {
             )
             .await?;
         let bytes = response_body.copy_to_bytes(response_body.remaining());
+        trace!(?bytes, "response from consul");
         Ok((
             serde_json::from_slice(&bytes).map_err(ConsulError::ResponseDeserializationFailed)?,
             index,
@@ -382,6 +386,7 @@ impl Consul {
             )
             .await?;
         let bytes = response_body.copy_to_bytes(response_body.remaining());
+        trace!(?bytes, "response from consul");
         let resp = serde_json::from_slice::<Vec<TransactionResponse>>(&bytes)
             .map_err(ConsulError::ResponseDeserializationFailed)?;
         Ok(resp)
@@ -459,6 +464,7 @@ impl Consul {
             .execute_request(req, hyper::Body::empty(), None, DELETE_KEY_METHOD_NAME)
             .await?;
         let bytes = response_body.copy_to_bytes(response_body.remaining());
+        trace!(?bytes, "response from consul");
         serde_json::from_slice(&bytes).map_err(ConsulError::ResponseDeserializationFailed)
     }
 
@@ -623,6 +629,7 @@ impl Consul {
             )
             .await?;
         let bytes = response_body.copy_to_bytes(response_body.remaining());
+        trace!(?bytes, "response from consul");
         let service_tags_by_name = serde_json::from_slice::<HashMap<String, Vec<String>>>(&bytes)
             .map_err(ConsulError::ResponseDeserializationFailed)?;
 
@@ -648,6 +655,7 @@ impl Consul {
             .execute_request(request, hyper::Body::empty(), opts.timeout, GET_DATACENTERS)
             .await?;
         let bytes = response_body.copy_to_bytes(response_body.remaining());
+        trace!(?bytes, "response from consul");
         let service_tags_by_name = serde_json::from_slice::<HashMap<String, Vec<String>>>(&bytes)
             .map_err(ConsulError::ResponseDeserializationFailed)?;
 
@@ -699,6 +707,7 @@ impl Consul {
             )
             .await?;
         let bytes = response_body.copy_to_bytes(response_body.remaining());
+        trace!(?bytes, "response from consul");
         let mut response = serde_json::from_slice::<Vec<NodeFull>>(&bytes)
             .map_err(ConsulError::ResponseDeserializationFailed)?;
         if let Some(node) = response.pop() {
@@ -734,6 +743,7 @@ impl Consul {
             )
             .await?;
         let bytes = response_body.copy_to_bytes(response_body.remaining());
+        trace!(?bytes, "response from consul");
         let response = serde_json::from_slice::<Vec<NodeFull>>(&bytes)
             .map_err(ConsulError::ResponseDeserializationFailed)?;
         Ok(ResponseMeta { response, index })
@@ -762,6 +772,7 @@ impl Consul {
             )
             .await?;
         let bytes = response_body.copy_to_bytes(response_body.remaining());
+        trace!(?bytes, "response from consul");
         let response = serde_json::from_slice::<GetServiceNodesResponse>(&bytes)
             .map_err(ConsulError::ResponseDeserializationFailed)?;
         Ok(ResponseMeta { response, index })
@@ -772,7 +783,7 @@ impl Consul {
         &self,
         service_name: &str,
         query_opts: Option<QueryOptions>,
-    ) -> Result<Vec<(String, u16)>> {
+    ) -> Result<Vec<(String, Option<u16>)>> {
         let request = GetServiceNodesRequest {
             service: service_name,
             passing: true,
@@ -810,11 +821,11 @@ impl Consul {
     /// in the health endpoint. These requests models are primarily for the
     /// health endpoints
     /// https://www.consul.io/api-docs/health#list-nodes-for-service
-    fn parse_host_port_from_service_node_response(sn: ServiceNode) -> (String, u16) {
+    fn parse_host_port_from_service_node_response(sn: ServiceNode) -> (String, Option<u16>) {
         (
             if sn.service.address.is_empty() {
                 info!(
-                    "Consul service {service_name} instance had an empty Service address, with port:{port}",
+                    "Consul service {service_name} instance had an empty Service address, with port:{port:?}",
                     service_name = &sn.service.service, port = sn.service.port
                 );
                 sn.node.address
@@ -880,6 +891,7 @@ impl Consul {
             )
             .await?;
         let bytes = response_body.copy_to_bytes(response_body.remaining());
+        trace!(?bytes, "response from consul");
         serde_json::from_slice(&bytes).map_err(ConsulError::ResponseDeserializationFailed)
     }
 
@@ -979,6 +991,7 @@ impl Consul {
                 .await
                 .map_err(|e| ConsulError::UnexpectedResponseCode(status, e.to_string()))?;
             let bytes = response_body.copy_to_bytes(response_body.remaining());
+            trace!(?bytes, "response from consul");
             let resp = std::str::from_utf8(&*bytes)
                 .map_err(|e| ConsulError::UnexpectedResponseCode(status, e.to_string()))?;
             return Err(ConsulError::UnexpectedResponseCode(
@@ -1119,6 +1132,7 @@ fn record_duration_metric_if_enabled(_method: &Method, _function: &str, _duratio
 mod tests {
     use std::time::Duration;
 
+    use test_log::test;
     use tokio::time::sleep;
 
     use super::*;
@@ -1189,7 +1203,7 @@ mod tests {
         for sn in list_response.response.iter() {
             let dereg_request = DeregisterEntityRequest {
                 node: "local",
-                service_id: Some(sn.service.id.as_str()),
+                service_id: Some(sn.id.as_str()),
                 ..Default::default()
             };
             consul.deregister_entity(&dereg_request).await.unwrap();
@@ -1241,7 +1255,7 @@ mod tests {
         assert!(service_names_after_register.contains(&new_service_name.to_owned()));
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[test(tokio::test(flavor = "multi_thread", worker_threads = 4))]
     async fn get_services_nodes() {
         let consul = get_client();
         let req = GetServiceNodesRequest {
@@ -1262,7 +1276,7 @@ mod tests {
 
         let addresses: Vec<String> = response
             .iter()
-            .map(|sn| sn.service.address.clone())
+            .map(|sn| sn.service_address.clone().unwrap())
             .collect();
         let expected_addresses = vec![
             "1.1.1.1".to_string(),
@@ -1275,7 +1289,7 @@ mod tests {
 
         let _: Vec<_> = response
             .iter()
-            .map(|sn| assert_eq!("dc1", sn.node.datacenter))
+            .map(|sn| assert_eq!("dc1", sn.datacenter))
             .collect();
     }
 
@@ -1415,14 +1429,14 @@ mod tests {
             id: "node".to_string(),
             service: "node".to_string(),
             address: "2.2.2.2".to_string(),
-            port: 32,
+            port: Some(32),
         };
 
         let empty_service = Service {
             id: "".to_string(),
             service: "".to_string(),
             address: "".to_string(),
-            port: 32,
+            port: Some(32),
         };
 
         let sn = ServiceNode {
