@@ -279,6 +279,7 @@ impl Consul {
             .execute_request(req, hyper::Body::empty(), None, READ_KEY_METHOD_NAME)
             .await?;
         let bytes = response_body.copy_to_bytes(response_body.remaining());
+        trace!(?bytes, "response from consul");
         serde_json::from_slice::<Vec<ReadKeyResponse>>(&bytes)
             .map_err(ConsulError::ResponseDeserializationFailed)
     }
@@ -299,6 +300,7 @@ impl Consul {
             .execute_request(req, hyper::Body::empty(), None, READ_OBJ_METHOD_NAME)
             .await?;
         let bytes = response_body.copy_to_bytes(response_body.remaining());
+        trace!(?bytes, "response from consul");
         serde_json::from_slice::<Vec<ReadKeyResponse<Base64Vec>>>(&bytes)
             .map_err(ConsulError::ResponseDeserializationFailed)?
             .into_iter()
@@ -352,6 +354,7 @@ impl Consul {
             )
             .await?;
         let bytes = response_body.copy_to_bytes(response_body.remaining());
+        trace!(?bytes, "response from consul");
         Ok((
             serde_json::from_slice(&bytes).map_err(ConsulError::ResponseDeserializationFailed)?,
             index,
@@ -383,6 +386,7 @@ impl Consul {
             )
             .await?;
         let bytes = response_body.copy_to_bytes(response_body.remaining());
+        trace!(?bytes, "response from consul");
         let resp = serde_json::from_slice::<Vec<TransactionResponse>>(&bytes)
             .map_err(ConsulError::ResponseDeserializationFailed)?;
         Ok(resp)
@@ -460,6 +464,7 @@ impl Consul {
             .execute_request(req, hyper::Body::empty(), None, DELETE_KEY_METHOD_NAME)
             .await?;
         let bytes = response_body.copy_to_bytes(response_body.remaining());
+        trace!(?bytes, "response from consul");
         serde_json::from_slice(&bytes).map_err(ConsulError::ResponseDeserializationFailed)
     }
 
@@ -624,6 +629,7 @@ impl Consul {
             )
             .await?;
         let bytes = response_body.copy_to_bytes(response_body.remaining());
+        trace!(?bytes, "response from consul");
         let service_tags_by_name = serde_json::from_slice::<HashMap<String, Vec<String>>>(&bytes)
             .map_err(ConsulError::ResponseDeserializationFailed)?;
 
@@ -649,6 +655,7 @@ impl Consul {
             .execute_request(request, hyper::Body::empty(), opts.timeout, GET_DATACENTERS)
             .await?;
         let bytes = response_body.copy_to_bytes(response_body.remaining());
+        trace!(?bytes, "response from consul");
         let service_tags_by_name = serde_json::from_slice::<HashMap<String, Vec<String>>>(&bytes)
             .map_err(ConsulError::ResponseDeserializationFailed)?;
 
@@ -700,6 +707,7 @@ impl Consul {
             )
             .await?;
         let bytes = response_body.copy_to_bytes(response_body.remaining());
+        trace!(?bytes, "response from consul");
         let mut response = serde_json::from_slice::<Vec<NodeFull>>(&bytes)
             .map_err(ConsulError::ResponseDeserializationFailed)?;
         if let Some(node) = response.pop() {
@@ -735,6 +743,7 @@ impl Consul {
             )
             .await?;
         let bytes = response_body.copy_to_bytes(response_body.remaining());
+        trace!(?bytes, "response from consul");
         let response = serde_json::from_slice::<Vec<NodeFull>>(&bytes)
             .map_err(ConsulError::ResponseDeserializationFailed)?;
         Ok(ResponseMeta { response, index })
@@ -882,6 +891,7 @@ impl Consul {
             )
             .await?;
         let bytes = response_body.copy_to_bytes(response_body.remaining());
+        trace!(?bytes, "response from consul");
         serde_json::from_slice(&bytes).map_err(ConsulError::ResponseDeserializationFailed)
     }
 
@@ -981,6 +991,7 @@ impl Consul {
                 .await
                 .map_err(|e| ConsulError::UnexpectedResponseCode(status, e.to_string()))?;
             let bytes = response_body.copy_to_bytes(response_body.remaining());
+            trace!(?bytes, "response from consul");
             let resp = std::str::from_utf8(&*bytes)
                 .map_err(|e| ConsulError::UnexpectedResponseCode(status, e.to_string()))?;
             return Err(ConsulError::UnexpectedResponseCode(
