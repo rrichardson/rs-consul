@@ -666,6 +666,29 @@ impl Consul {
         })
     }
 
+    /// Returns all nodes currently registered in consul
+    /// See https://developer.hashicorp.com/consul/api-docs/catalog#list-nodes
+    /// # Arguments:
+    /// - query_opts: The [`QueryOptions`](QueryOptions) to apply for this endpoint.
+    /// # Errors:
+    /// [ConsulError](consul::ConsulError) describes all possible errors returned by this api.
+    pub async fn get_nodes(
+        &self,
+        query_opts: Option<&QueryOptions>,
+    ) -> Result<ResponseMeta<Vec<Node>>> {
+        let opts = query_opts.unwrap_or(&(*DEFAULT_QUERY_OPTS));
+        let request = self.create_get_catalog_request("nodes", opts);
+        let (mut response_body, index) = self
+            .execute_request(request, hyper::Body::empty(), opts.timeout, GET_DATACENTERS)
+            .await?;
+        let bytes = response_body.copy_to_bytes(response_body.remaining());
+        trace!(?bytes, "response from consul");
+
+        let response = serde_json::from_slice::<Vec<Node>>(&bytes)
+            .map_err(ConsulError::ResponseDeserializationFailed)?;
+        Ok(ResponseMeta { response, index })
+    }
+
     fn create_get_catalog_request(
         &self,
         name: &str,
