@@ -48,6 +48,7 @@ use slog_scope::{error, info};
 use tokio::time::timeout;
 use tracing::trace;
 pub use types::*;
+use urlencoding::encode;
 
 mod hyper_wrapper;
 /// The strongly typed data structures representing canonical consul objects.
@@ -910,7 +911,8 @@ impl Consul {
             url.push_str(&format!("?passing={}", request.passing));
         }
         if let Some(filter) = request.filter {
-            url.push_str(&format!("&filter={filter}"));
+            let filter = build_filter_string(filter);
+            url.push_str(&format!("&{filter}"));
         }
         add_query_option_params(&mut url, query_opts, '&');
         req.uri(url)
@@ -934,7 +936,8 @@ impl Consul {
             url.push_str(&format!("&near={near}"));
         }
         if let Some(filter) = request.filter {
-            url.push_str(&format!("&filter={filter}"));
+            let filter = build_filter_string(filter);
+            url.push_str(&format!("&{filter}"));
         }
         add_query_option_params(&mut url, query_opts, '&');
         req.uri(url)
@@ -1099,6 +1102,11 @@ fn add_query_param_separator(mut url: String, already_added: bool) -> String {
     }
 
     url
+}
+
+fn build_filter_string(filter: &str) -> String {
+    let filter = format!("filter=\"{}\"", filter);
+    encode(&filter).into_owned()
 }
 
 fn record_request_metric_if_enabled(_method: &Method, _function: &str) {
