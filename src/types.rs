@@ -448,7 +448,7 @@ pub struct RegisterEntityCheck {
     pub service_id: Option<String>,
     /// Details for a TCP or HTTP health check.
     #[serde(skip_serializing_if = "HashMap::is_empty")]
-    pub definition: HashMap<String, String>,
+    pub definition: HashMap<String, serde_json::Value>,
 }
 
 /// Request body for de-registering a check or service from the Catalog
@@ -562,7 +562,7 @@ pub struct NodeFull {
     /// service_meta
     pub service_meta: HashMap<String, String>,
     /// service_tagged_addresses
-    pub service_tagged_addresses: HashMap<String, HashMap<String, serde_json::Value>>,
+    pub service_tagged_addresses: Option<HashMap<String, HashMap<String, serde_json::Value>>>,
     /// service_tags
     pub service_tags: Vec<String>,
     ///  namespace
