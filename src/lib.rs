@@ -153,6 +153,7 @@ const CREATE_OR_UPDATE_KEY_SYNC_METHOD_NAME: &str = "create_or_update_key_sync";
 const DELETE_KEY_METHOD_NAME: &str = "delete_key";
 const GET_LOCK_METHOD_NAME: &str = "get_lock";
 const REGISTER_ENTITY_METHOD_NAME: &str = "register_entity";
+const REGISTER_SERVICE_METHOD_NAME: &str = "register_service";
 const DEREGISTER_ENTITY_METHOD_NAME: &str = "deregister_entity";
 const GET_ALL_REGISTERED_SERVICE_NAMES_METHOD_NAME: &str = "get_all_registered_service_names";
 const GET_SERVICE_NODES_HEALTH_METHOD_NAME: &str = "get_service_nodes_health";
@@ -669,6 +670,25 @@ impl Consul {
             payload.into(),
             Some(Duration::from_secs(5)),
             REGISTER_ENTITY_METHOD_NAME,
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Registers a new service, with optional health checks, to the local agent.
+    /// See https://www.consul.io/api-docs/agent/service#register-service for more information.
+    pub async fn register_agent_service(
+        &self,
+        payload: &RegisterAgentServiceRequest<'_>,
+    ) -> Result<()> {
+        let uri = format!("{}/v1/agent/service/register", self.config.address);
+        let request = hyper::Request::builder().method(Method::PUT).uri(uri);
+        let payload = serde_json::to_string(payload).map_err(ConsulError::InvalidRequest)?;
+        self.execute_request(
+            request,
+            payload.into(),
+            Some(Duration::from_secs(5)),
+            REGISTER_SERVICE_METHOD_NAME,
         )
         .await?;
         Ok(())
@@ -1268,6 +1288,35 @@ mod tests {
         let req = ReadKeyRequest::new().set_key(key);
         let res = consul.read_key::<ComplexStruct>(req).await.unwrap();
         assert_eq!(value, res.into_iter().next().unwrap().value.unwrap());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_register_agent_service() {
+        let consul = get_client();
+        let agent_check = AgentServiceCheck {
+            name: "test-agent-check",
+            id: None,
+            namespace: None,
+            interval: "10s",
+            notes: None,
+            deregister_critical_service_after: "24h",
+            http: Some("http://localhost:8080/health"),
+            method: Some("GET"),
+            timeout: "5s",
+            tls_skip_verify: true,
+
+            ..Default::default()
+        };
+
+        let payload = RegisterAgentServiceRequest {
+            name: "test-agent-service",
+            address: "127.0.0.1",
+            port: 8080,
+            check: Some(agent_check),
+            ..Default::default()
+        };
+
+        consul.register_agent_service(&payload).await.unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread")]

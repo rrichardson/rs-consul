@@ -393,6 +393,211 @@ pub struct RegisterEntityRequest<'a> {
     pub skip_node_update: Option<bool>,
 }
 
+/// The kind of service
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ServiceKind {
+    /// for service mesh proxes
+    ConnectProxy,
+    /// for instances of a mesh gateway
+    MeshGateway,
+    /// for instances of a terminating gateway
+    TerminatingGateway,
+    /// for instances of an ingress gateway
+    IngressGateway,
+}
+
+/// Specifies the configuration for a service mesh proxy instance.
+#[derive(Clone, Debug, Serialize)]
+pub struct ProxyConfig<'a> {
+    /// Name of the service mesh proxy
+    pub name: &'a str,
+    /// The type for the service. This should always be set to connect-proxy
+    /// to declare the services as a service mesh proxy
+    pub kind: ServiceKind,
+    /// Specifies the port where other services in the mesh can discover
+    pub port: u16,
+    /// Specifies the IP address of the proxy
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub address: Option<&'a str>,
+}
+
+/// Specifies the configuration for service mesh
+/// See https://developer.hashicorp.com/consul/api-docs/agent/service#connect-structure for more information.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct ConnectConfig {
+    /// Specifies whether this service supports the Consul service mesh protocol natively.
+    /// If this is true, then service mesh proxies, DNS queries, etc. will be able to
+    /// service discover this service.
+    pub native: bool,
+}
+
+/// Register an agent service check
+/// See https://developer.hashicorp.com/consul/api-docs/agent/check#register-check for more information
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct AgentServiceCheck<'a> {
+    /// Specifies the name of the check
+    pub name: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Specifies the ID of the check. If not provided, the Name field will be used as the ID
+    pub id: Option<&'a str>,
+    /// Specifies the namespace to use
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub namespace: Option<&'a str>,
+    /// Specifies the interval at which to run this check. This is required
+    /// for HTTP, TCP and UDP checks
+    pub interval: &'a str,
+    /// Arbitrary information for humans
+    pub notes: Option<&'a str>,
+    /// This is specified as a time duration with suffix like "10m".
+    pub deregister_critical_service_after: &'a str,
+    /// Specifies command arguments to run to update the status of the check
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub args: Option<Vec<&'a str>>,
+    /// Specifies the ID of the node for an alias check. If no service is specified,
+    /// the check will alias the health of the node. If a service is specified,
+    /// the check will alias the specified service on this particular node
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alias_node: Option<&'a str>,
+    /// Specifies the ID of a service for an alias check
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alias_service: Option<&'a str>,
+    /// Specifies that the check is a Docker check, and Consul will evaluate the script
+    /// every Interval in the given container using the specified Shell
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub docker_container_id: Option<&'a str>,
+    #[serde(rename = "GRPC")]
+    /// Specifies a gRPC check to perform a gRPC health check against the value of GRPC
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grpc: Option<&'a str>,
+    /// Specifies whether to use TLS when running a gRPC check
+    #[serde(rename = "GRPCUseTLS")]
+    pub grpc_use_tls: bool,
+    /// Specifies an address that uses http2 to run a ping check on. At the specified
+    /// Interval, a connection is made to the address, and a ping is sent
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub h2ping: Option<&'a str>,
+    /// Specifies whether to use TLS when running an h2ping check
+    #[serde(rename = "H2PingUseTLS")]
+    pub h2ping_use_tls: bool,
+    /// Specifies an HTTP check to perform a GET request against the value of
+    /// HTTP (expected to be a URL) every Interval.
+    #[serde(rename = "HTTP")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub http: Option<&'a str>,
+    /// Specifies which HTTP method to use for an HTTP check
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub method: Option<&'a str>,
+    /// Specifies a string to use as the body of the HTTP request
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body: Option<&'a str>,
+    /// Specifies whether to disable following redirects for HTTP checks
+    pub disable_redirects: bool,
+    /// Specifies a set of headers to be sent with HTTP checks
+    pub header: Option<HashMap<&'a str, &'a str>>,
+    /// Specifies a timeout for outgoing connections. Can be specified in the form of
+    /// "10s" or "5m" (i.e., 10 seconds or 5 minutes, respectively).
+    pub timeout: &'a str,
+    /// Allow to put a max size of text for the given check
+    pub output_max_size: u32,
+    /// Specifies an optional string used to set the SNI host when connecting via TLS.
+    /// For an HTTP check, this value is set automatically if the URL uses a hostname
+    /// (not an IP address).
+    #[serde(rename = "TLSServerName")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tls_server_name: Option<&'a str>,
+    /// Specifies whether to use TLS when running an HTTP check
+    pub tls_skip_verify: bool,
+
+    /// Specifies a TCP check to perform a TCP connect to the address every Interval.
+    #[serde(rename = "TCP")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tcp: Option<&'a str>,
+    /// Specifies a UDP check to send a UDP packet to the address every Interval.
+    #[serde(rename = "UDP")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub udp: Option<&'a str>,
+
+    /// Specifies the identifier of an OS-level service to check. You can specify either Windows Services on Windows or SystemD services on Unix.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub os_service: Option<&'a str>,
+    /// Specifies this is a TTL check, and the TTL endpoint must be used periodically to update the state of the check. If the check is not set to passing within the specified duration, then the check will be set to the failed state.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ttl: Option<&'a str>,
+    /// Specifies the ID of a service to associate the registered check with an existing service provided by the agent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service_id: Option<&'a str>,
+    /// Specifies the initial status of the health check.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<&'a str>,
+    /// Specifies the number of consecutive successful results required before check status transitions to passing. Available for HTTP, TCP, gRPC, Docker & Monitor checks. Added in Consul 1.7.0.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub success_before_passing: Option<u16>,
+    /// Specifies the number of consecutive unsuccessful results required before check status transitions to warning. Defaults to the same value as FailuresBeforeCritical. Values higher than FailuresBeforeCritical are invalid. Available for HTTP, TCP, gRPC, Docker & Monitor checks. Added in Consul 1.11.0.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failures_before_warning: Option<u16>,
+    /// Specifies the number of consecutive unsuccessful results required before check status transitions to critical. Available for HTTP, TCP, gRPC, Docker & Monitor checks. Added in Consul 1.7.0.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failures_before_critical: Option<u16>,
+}
+
+/// Register a agent service.
+/// See https://developer.hashicorp.com/consul/api-docs/agent/service#register-service
+/// for more information.
+#[derive(Clone, Default, Debug, Serialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct RegisterAgentServiceRequest<'a> {
+    /// Specifies the logical name of the service. Many service instances may share the same
+    /// logical service name. We recommend using valid DNS labels for service definition names
+    pub name: &'a str,
+    /// Specifies a unique ID for this service. This must be unique per agent.
+    /// This defaults to the Name parameter if not provided.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<&'a str>,
+    /// Specifies a list of tags to assign to the service.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<&'a str>>,
+    /// Specifies the address of the service. If not provided, the agent's address
+    /// is used as the address for the service during DNS queries
+    pub address: &'a str,
+    /// Specifies a map of explicit LAN and WAN addresses for the service instance
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub tagged_addresses: HashMap<&'a str, &'a str>,
+    /// Specifies arbitrary KV metadata linked to the service instance.
+    pub meta: HashMap<&'a str, &'a str>,
+    /// The consul namespace to register the service in.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub namespace: Option<&'a str>,
+    /// Specifies the port of the service.
+    pub port: u16,
+    /// The kind of service
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<ServiceKind>,
+    /// Specifies the configuration for a service mesh proxy instance.
+    /// This is only valid if Kind defines a proxy or gateway
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<ProxyConfig<'a>>,
+    /// Specifies the configuration for service mesh
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connect: Option<ConnectConfig>,
+    /// Optional check to register
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub check: Option<AgentServiceCheck<'a>>,
+    /// Specifies to disable the anti-entropy feature for this service's tags
+    pub enable_tag_override: bool,
+    /// Specifies weights for the service
+    /// Weights only apply to the locally registered service. If multiple nodes
+    /// register the same service, each node implements EnableTagOverride and other
+    /// service configuration items independently. Updating the tags for the service
+    /// registered on one node does not necessarily update the same tags on services
+    /// with the same name registered on another node. If EnableTagOverride is not
+    /// specified the default value is false.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub weights: Option<HashMap<String, u8>>,
+}
+
 /// The service to register with consul's global catalog.
 /// See https://www.consul.io/api/agent/service for more information.
 #[derive(Clone, Debug, Serialize)]
@@ -448,7 +653,7 @@ pub struct RegisterEntityCheck {
     pub service_id: Option<String>,
     /// Details for a TCP or HTTP health check.
     #[serde(skip_serializing_if = "HashMap::is_empty")]
-    pub definition: HashMap<String, String>,
+    pub definition: HashMap<String, serde_json::Value>,
 }
 
 /// Request body for de-registering a check or service from the Catalog
@@ -562,7 +767,7 @@ pub struct NodeFull {
     /// service_meta
     pub service_meta: HashMap<String, String>,
     /// service_tagged_addresses
-    pub service_tagged_addresses: HashMap<String, HashMap<String, serde_json::Value>>,
+    pub service_tagged_addresses: Option<HashMap<String, HashMap<String, serde_json::Value>>>,
     /// service_tags
     pub service_tags: Vec<String>,
     ///  namespace
